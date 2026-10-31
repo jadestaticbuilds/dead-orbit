@@ -1,1 +1,710 @@
-<h1>Dead Orbit</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Dead Orbit - space salvage</title>
+<style>
+  :root{ --jade:#2ee6a8; --ink:#eef7f2; --dim:#93ab9e; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; padding:0; height:100%; background:#04060e; color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; overflow:hidden;
+    user-select:none; -webkit-user-select:none; touch-action:none; }
+  #app{ position:fixed; inset:0; }
+  #cv{ position:absolute; inset:0; width:100%; height:100%; display:block; }
+  #hud{ position:absolute; top:0; left:0; right:0; display:flex; align-items:center; gap:10px;
+    padding:calc(8px + env(safe-area-inset-top)) 12px 8px; pointer-events:none; }
+  #hud .pill{ background:rgba(4,10,12,.72); border:1px solid rgba(46,230,168,.35); border-radius:999px;
+    padding:6px 12px; font-size:13px; letter-spacing:.04em; white-space:nowrap; }
+  #hud .spacer{ flex:1; }
+  #hud button{ pointer-events:auto; min-width:48px; min-height:48px; border-radius:12px;
+    background:rgba(4,10,12,.72); border:1px solid rgba(46,230,168,.35); color:var(--ink);
+    font-size:18px; }
+  #fuelwrap{ width:110px; height:10px; border:1px solid rgba(46,230,168,.4); border-radius:6px; overflow:hidden; }
+  #fuelbar{ height:100%; width:100%; background:linear-gradient(90deg,#00a86b,#2ee6a8); }
+  #burns{ letter-spacing:2px; color:var(--jade); }
+  #msg{ position:absolute; top:calc(64px + env(safe-area-inset-top)); left:0; right:0; text-align:center;
+    font-size:15px; letter-spacing:.08em; color:var(--jade); text-shadow:0 0 12px rgba(46,230,168,.6);
+    opacity:0; transition:opacity .25s; pointer-events:none; padding:0 16px; }
+  #hint{ position:absolute; bottom:calc(10px + env(safe-area-inset-bottom)); left:0; right:0; text-align:center;
+    font-size:13px; color:var(--dim); letter-spacing:.05em; pointer-events:none; padding:0 16px; }
+  .overlay{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background:rgba(2,4,8,.82); z-index:5; padding:20px; }
+  .panel{ width:min(430px,94vw); max-height:88vh; overflow-y:auto; background:#071018;
+    border:1px solid rgba(46,230,168,.35); border-radius:18px; padding:22px; text-align:center; }
+  .panel h1{ margin:0 0 4px; font-size:30px; letter-spacing:.14em; color:var(--jade); }
+  .panel h2{ margin:0 0 10px; font-size:20px; letter-spacing:.1em; color:var(--jade); }
+  .panel p{ color:var(--dim); font-size:14px; line-height:1.55; margin:8px 0; }
+  .panel .big{ font-size:17px; color:var(--ink); }
+  .btn{ display:block; width:100%; min-height:52px; margin:10px 0 0; border-radius:14px; border:1px solid var(--jade);
+    background:rgba(46,230,168,.12); color:var(--ink); font-size:17px; letter-spacing:.06em; }
+  .btn:active{ background:rgba(46,230,168,.28); }
+  .btn.ghost{ border-color:rgba(147,171,158,.4); background:transparent; color:var(--dim); }
+  .runrow{ display:flex; align-items:center; gap:10px; width:100%; min-height:56px; margin:8px 0 0;
+    padding:10px 14px; border-radius:14px; border:1px solid rgba(147,171,158,.3);
+    background:rgba(255,255,255,.03); color:var(--ink); font-size:15px; text-align:left; }
+  .runrow .n{ color:var(--dim); font-size:13px; min-width:22px; }
+  .runrow .t{ flex:1; }
+  .runrow .t small{ display:block; color:var(--dim); font-size:12px; margin-top:2px; }
+  .runrow .done{ color:var(--jade); font-size:18px; }
+  .hidden{ display:none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="cv"></canvas>
+  <div id="hud">
+    <span class="pill" id="runname">-</span>
+    <span class="pill" id="burns"></span>
+    <span class="pill"><span id="fuelwrap"><span id="fuelbar"></span></span></span>
+    <span class="spacer"></span>
+    <button id="sndbtn" aria-label="toggle sound">&#9836;</button>
+    <button id="restartbtn" aria-label="restart run">&#10227;</button>
+  </div>
+  <div id="msg"></div>
+  <div id="hint">Drag back from the tug, release to burn</div>
+
+  <div class="overlay" id="ov-start">
+    <div class="panel">
+      <h1>DEAD ORBIT</h1>
+      <p>space salvage</p>
+      <p class="big">Wrecks drift in the system. Plot the burn, grapple them, tow them home. Gravity does the rest.</p>
+      <p>Drag back from the tug and release to burn. The dotted arc is your future, drawn honest. Match the wreck gently or you will bounce off.</p>
+      <div id="runlist"></div>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="ov-pause">
+    <div class="panel">
+      <h2>PAUSED</h2>
+      <p>The drift waits for no one, but it will wait for you.</p>
+      <button class="btn" id="resumebtn">RESUME</button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="ov-end">
+    <div class="panel">
+      <h2 id="endtitle">WRECK SECURED</h2>
+      <p class="big" id="endline"></p>
+      <p id="endbest"></p>
+      <button class="btn" id="nextbtn">NEXT RUN</button>
+      <button class="btn ghost" id="replaybtn">REPLAY RUN</button>
+      <button class="btn ghost" id="runsbtn">ALL RUNS</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/*__PHYS_START__*/
+'use strict';
+var DO_PHYS = (function(){
+  var DT = 1/120;
+  var WORLD_W = 900, WORLD_H = 1400;
+
+  function d2(ax,ay,bx,by){ var dx=bx-ax, dy=by-ay; return dx*dx+dy*dy; }
+
+  function grav(ax, ay, px, py, gm){
+    var dx=px-ax, dy=py-ay;
+    var dd=dx*dx+dy*dy;
+    if(dd<4) dd=4;
+    var d=Math.sqrt(dd);
+    var a=gm/dd;
+    return [a*dx/d, a*dy/d];
+  }
+
+  function moonPos(def, t){
+    if(!def.moon) return null;
+    var m=def.moon;
+    var a=m.a0 + m.om*t;
+    return { x:def.planet.x + m.ro*Math.cos(a), y:def.planet.y + m.ro*Math.sin(a) };
+  }
+
+  var PLANET = { x:450, y:770, r:110, gm:900000 };
+  // The station keeps a circular orbit: STATION holds orbital elements,
+  // stationPos/stationVel give its state at time t (deterministic).
+  var STATION = { ro:590, a0:-Math.PI/2, om:Math.sqrt(900000/Math.pow(590,3)) };
+
+  function stationPos(def,t){
+    var st=def.station;
+    var a=st.a0+st.om*t;
+    return { x:def.planet.x+st.ro*Math.cos(a), y:def.planet.y+st.ro*Math.sin(a) };
+  }
+  function stationVel(def,t){
+    var st=def.station;
+    var a=st.a0+st.om*t, v=st.om*st.ro;
+    return { x:-v*Math.sin(a), y:v*Math.cos(a) };
+  }
+
+  var RUNS = [
+    { name:'First Tow',    sub:'A cold one, parked and waiting.',
+      wreck:{x:650,y:1050,vx:0,vy:0}, fuel:340, burns:5, moon:null },
+    { name:'Long Way Round', sub:'Far side of the yard.',
+      wreck:{x:180,y:1150,vx:0,vy:0}, fuel:340, burns:5, moon:null },
+    { name:'Drifter',      sub:'She is moving. Meet her gently.',
+      wreck:{x:650,y:950,vx:12,vy:4}, fuel:340, burns:5, moon:null },
+    { name:'Far Side',     sub:'Behind the planet. Let gravity help.',
+      wreck:{x:450,y:1290,vx:0,vy:0}, fuel:360, burns:5, moon:null },
+    { name:'Tight Fuel',   sub:'The tank is light. Make every burn count.',
+      wreck:{x:760,y:700,vx:0,vy:0}, fuel:230, burns:5, moon:null },
+    { name:'Moonrise',     sub:'The moon pulls. So do you.',
+      wreck:{x:200,y:900,vx:0,vy:0}, fuel:360, burns:5,
+      moon:{ro:380,a0:0.6,om:0.128,gm:90000,r:34} },
+    { name:'Fast Drifter', sub:'Quick and the moon is up.',
+      wreck:{x:700,y:1100,vx:-18,vy:10}, fuel:360, burns:5,
+      moon:{ro:380,a0:2.2,om:0.128,gm:90000,r:34} },
+    { name:'Gauntlet',     sub:'Everything at once. Fly clean.',
+      wreck:{x:300,y:980,vx:10,vy:-14}, fuel:260, burns:5,
+      moon:{ro:380,a0:4.0,om:0.128,gm:90000,r:34} }
+  ];
+
+  var TUG0 = null; // tug starts docked: set in runDef from the station orbit
+  var GRAPPLE_D = 45, GRAPPLE_V = 40, DOCK_D = 55, DOCK_V = 45;
+
+  function newState(def){
+    return {
+      t:0,
+      tx:def.tug.x, ty:def.tug.y, tvx:def.tug.vx||0, tvy:def.tug.vy||0,
+      wx:def.wreck.x, wy:def.wreck.y, wvx:def.wreck.vx||0, wvy:def.wreck.vy||0,
+      attached:false, phase:'towreck',
+      burnsLeft:def.burns, fuelLeft:def.fuel,
+      failReason:null, bounceCd:0, events:[]
+    };
+  }
+
+  function cloneState(s, def){
+    return {
+      t:s.t, tx:s.tx, ty:s.ty, tvx:s.tvx, tvy:s.tvy,
+      wx:s.wx, wy:s.wy, wvx:s.wvx, wvy:s.wvy,
+      attached:s.attached, phase:s.phase,
+      burnsLeft:s.burnsLeft, fuelLeft:s.fuelLeft,
+      failReason:s.failReason, bounceCd:s.bounceCd, events:[]
+    };
+  }
+
+  function step(s, def){
+    var p=def.planet;
+    s.t+=DT;
+    if(s.bounceCd>0) s.bounceCd-=DT;
+    var ax=0, ay=0, g;
+    g=grav(s.tx,s.ty,p.x,p.y,p.gm); ax+=g[0]; ay+=g[1];
+    var mp=moonPos(def,s.t);
+    if(mp){ g=grav(s.tx,s.ty,mp.x,mp.y,def.moon.gm); ax+=g[0]; ay+=g[1]; }
+    s.tvx+=ax*DT; s.tvy+=ay*DT;
+    s.tx+=s.tvx*DT; s.ty+=s.tvy*DT;
+    if(!s.attached){ s.wx+=s.wvx*DT; s.wy+=s.wvy*DT; }
+    else { s.wx=s.tx; s.wy=s.ty; s.wvx=s.tvx; s.wvy=s.tvy; }
+
+    var dp=Math.sqrt(d2(s.tx,s.ty,p.x,p.y));
+    if(dp < p.r){ s.phase='failed'; s.failReason='lost'; s.events.push({k:'planet',t:s.t}); return; }
+    if(dp > 1700){ s.phase='failed'; s.failReason='adrift'; s.events.push({k:'adrift',t:s.t}); return; }
+
+    if(s.phase==='towreck' && !s.attached){
+      var dw=Math.sqrt(d2(s.tx,s.ty,s.wx,s.wy));
+      if(dw < GRAPPLE_D){
+        var rvx=s.tvx-s.wvx, rvy=s.tvy-s.wvy;
+        var rv=Math.sqrt(rvx*rvx+rvy*rvy);
+        if(rv < GRAPPLE_V){
+          s.attached=true; s.phase='towing';
+          s.events.push({k:'grapple',t:s.t});
+        } else {
+          s.events.push({k:'grappleFast',t:s.t});
+        }
+      }
+    } else if(s.phase==='towing'){
+      var stp=stationPos(def,s.t), stv=stationVel(def,s.t);
+      var ds=Math.sqrt(d2(s.tx,s.ty,stp.x,stp.y));
+      if(ds < DOCK_D){
+        var drvx=s.tvx-stv.x, drvy=s.tvy-stv.y;
+        var drv=Math.sqrt(drvx*drvx+drvy*drvy);
+        if(drv < DOCK_V){
+          s.phase='docked';
+          s.events.push({k:'dock',t:s.t});
+        } else if(s.bounceCd<=0){
+          var nx=(s.tx-stp.x)/ds, ny=(s.ty-stp.y)/ds;
+          s.tvx=stv.x+nx*DOCK_V*0.7;
+          s.tvy=stv.y+ny*DOCK_V*0.7;
+          s.bounceCd=1.0;
+          s.events.push({k:'bounce',t:s.t});
+        }
+      }
+    }
+  }
+
+  function applyBurn(s, def, ang, dv){
+    if(s.burnsLeft<=0 || s.phase==='docked' || s.phase==='failed') return 0;
+    dv=Math.max(0, Math.min(dv, s.fuelLeft));
+    if(dv<=0) return 0;
+    s.tvx+=Math.cos(ang)*dv; s.tvy+=Math.sin(ang)*dv;
+    s.fuelLeft-=dv; s.burnsLeft--;
+    s.events.push({k:'burn',t:s.t,ang:ang,dv:dv});
+    return dv;
+  }
+
+  // burns: [{at,ang,dv}], applied in order once s.t>=at
+  function simulateFrom(s0, def, burns, maxT, snapEvery){
+    var s=cloneState(s0, def);
+    var pts=[], snaps=[];
+    var bi=0, n=Math.ceil(maxT/DT);
+    for(var i=0;i<n;i++){
+      while(bi<burns.length && s.t>=burns[bi].at){
+        applyBurn(s, def, burns[bi].ang, burns[bi].dv); bi++;
+      }
+      step(s, def);
+      if(i%12===0) pts.push([s.tx,s.ty]);
+      if(snapEvery && i%snapEvery===0) snaps.push({t:s.t, s:cloneState(s,def)});
+      if(s.phase==='docked'||s.phase==='failed') break;
+    }
+    snaps.push({t:s.t, s:cloneState(s,def)});
+    return { state:s, points:pts, snaps:snaps };
+  }
+
+  function runDef(i){
+    var r=RUNS[i];
+    var def={
+      planet:PLANET, station:STATION, moon:r.moon||null,
+      tug:null,
+      wreck:{x:r.wreck.x,y:r.wreck.y,vx:r.wreck.vx,vy:r.wreck.vy},
+      fuel:r.fuel, burns:r.burns,
+      grappleD:GRAPPLE_D, grappleV:GRAPPLE_V, dockD:DOCK_D, dockV:DOCK_V,
+      name:r.name, sub:r.sub, idx:i
+    };
+    var sp0=stationPos(def,0), sv0=stationVel(def,0);
+    def.tug={x:sp0.x, y:sp0.y, vx:sv0.x, vy:sv0.y};
+    return def;
+  }
+
+  return {
+    DT:DT, WORLD_W:WORLD_W, WORLD_H:WORLD_H,
+    RUNS:RUNS, PLANET:PLANET, STATION:STATION,
+    GRAPPLE_D:GRAPPLE_D, GRAPPLE_V:GRAPPLE_V, DOCK_D:DOCK_D, DOCK_V:DOCK_V,
+    newState:newState, cloneState:cloneState, step:step,
+    applyBurn:applyBurn, simulateFrom:simulateFrom, moonPos:moonPos,
+    stationPos:stationPos, stationVel:stationVel, runDef:runDef
+  };
+})();
+if (typeof module!=='undefined' && module.exports) module.exports = DO_PHYS;
+/*__PHYS_END__*/
+</script>
+<script>
+(function(){
+'use strict';
+var P = DO_PHYS;
+var DT = P.DT;
+
+/* ---------- persistence ---------- */
+var store = {
+  get:function(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
+  set:function(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+};
+function doneRun(i){ return store.get('do-done-'+i)==='1'; }
+function bestFuel(i){ var v=parseFloat(store.get('do-best-'+i)); return isNaN(v)?null:v; }
+
+/* ---------- dom ---------- */
+var cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+var elRun=document.getElementById('runname'), elBurns=document.getElementById('burns'),
+    elFuel=document.getElementById('fuelbar'), elMsg=document.getElementById('msg'),
+    elHint=document.getElementById('hint');
+var ovStart=document.getElementById('ov-start'), ovPause=document.getElementById('ov-pause'),
+    ovEnd=document.getElementById('ov-end');
+var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- view ---------- */
+var view={cw:0,ch:0,scale:1,ox:0,oy:0};
+function resize(){
+  var dpr=Math.min(3, window.devicePixelRatio||1);
+  view.cw=window.innerWidth; view.ch=window.innerHeight;
+  cv.width=Math.round(view.cw*dpr); cv.height=Math.round(view.ch*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  view.scale=Math.min(view.cw/P.WORLD_W, view.ch/P.WORLD_H);
+  view.ox=(view.cw-P.WORLD_W*view.scale)/2;
+  view.oy=(view.ch-P.WORLD_H*view.scale)/2;
+}
+window.addEventListener('resize', resize); resize();
+function w2s(x,y){ return [view.ox+x*view.scale, view.oy+y*view.scale]; }
+function s2w(x,y){ return [(x-view.ox)/view.scale, (y-view.oy)/view.scale]; }
+
+/* ---------- seeded stars ---------- */
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; var t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+var stars=[];
+(function(){ var r=mulberry32(7); for(var i=0;i<150;i++) stars.push([r()*P.WORLD_W, r()*P.WORLD_H, r()]); })();
+
+/* ---------- audio ---------- */
+var AU={
+  ctx:null, master:null, on: store.get('do-sound')!=='0',
+  init:function(){
+    if(this.ctx) return;
+    var C=window.AudioContext||window.webkitAudioContext; if(!C) return;
+    this.ctx=new C(); this.master=this.ctx.createGain();
+    this.master.gain.value=this.on?0.9:0; this.master.connect(this.ctx.destination);
+    var o1=this.ctx.createOscillator(), o2=this.ctx.createOscillator(), f=this.ctx.createBiquadFilter();
+    o1.type='sine'; o1.frequency.value=48; o2.type='triangle'; o2.frequency.value=96.5;
+    f.type='lowpass'; f.frequency.value=220;
+    var g=this.ctx.createGain(); g.gain.value=0.035;
+    o1.connect(f); o2.connect(f); f.connect(g); g.connect(this.master);
+    o1.start(); o2.start();
+  },
+  setOn:function(v){ this.on=v; store.set('do-sound', v?'1':'0');
+    if(this.master) this.master.gain.value=v?0.9:0; },
+  env:function(node,t0,a,peak,dur){
+    var g=this.ctx.createGain(); g.gain.setValueAtTime(0.0001,t0);
+    g.gain.exponentialRampToValueAtTime(peak,t0+a);
+    g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+    node.connect(g); g.connect(this.master); return g;
+  },
+  noiseBuf:function(){
+    var b=this.ctx.createBuffer(1,this.ctx.sampleRate*0.7,this.ctx.sampleRate);
+    var d=b.getChannelData(0); for(var i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+    return b;
+  },
+  burn:function(){
+    if(!this.ctx||!this.on) return; var t=this.ctx.currentTime;
+    var n=this.ctx.createBufferSource(); n.buffer=this.noiseBuf();
+    var f=this.ctx.createBiquadFilter(); f.type='lowpass';
+    f.frequency.setValueAtTime(500,t); f.frequency.exponentialRampToValueAtTime(70,t+0.6);
+    n.connect(f); this.env(f,t,0.02,0.5,0.65); n.start(t); n.stop(t+0.7);
+    var o=this.ctx.createOscillator(); o.type='sine';
+    o.frequency.setValueAtTime(75,t); o.frequency.exponentialRampToValueAtTime(34,t+0.5);
+    this.env(o,t,0.02,0.4,0.55); o.start(t); o.stop(t+0.6);
+  },
+  blip:function(fr,dur,peak,type){
+    if(!this.ctx||!this.on) return; var t=this.ctx.currentTime;
+    var o=this.ctx.createOscillator(); o.type=type||'sine'; o.frequency.value=fr;
+    this.env(o,t,0.01,peak||0.25,dur||0.2); o.start(t); o.stop(t+(dur||0.2)+0.05);
+  },
+  grapple:function(){ this.blip(190,0.16,0.35,'square'); var self=this; setTimeout(function(){self.blip(120,0.2,0.3,'sine');},90); },
+  dock:function(){ this.blip(520,0.3,0.3); var self=this; setTimeout(function(){self.blip(780,0.45,0.3);},160); },
+  bad:function(){ this.blip(140,0.25,0.3,'sawtooth'); },
+  click:function(){ this.blip(1150,0.06,0.12); }
+};
+function sndBtn(){ return document.getElementById('sndbtn'); }
+function refreshSnd(){ sndBtn().style.opacity = AU.on?1:0.35; }
+sndBtn().addEventListener('click', function(e){ e.stopPropagation(); AU.init(); AU.setOn(!AU.on); refreshSnd(); AU.click(); });
+refreshSnd();
+
+/* ---------- game state ---------- */
+var runIdx=0, def=null, s=null;
+var playing=false, aiming=false, aimX=0, aimY=0;
+var flareT=0, msgTimer=null, lastBurns=-1;
+
+function showMsg(t, ms){
+  elMsg.textContent=t; elMsg.style.opacity=1;
+  if(msgTimer) clearTimeout(msgTimer);
+  msgTimer=setTimeout(function(){ elMsg.style.opacity=0; }, ms||2200);
+}
+
+function buildRunList(){
+  var box=document.getElementById('runlist'); box.innerHTML='';
+  P.RUNS.forEach(function(r,i){
+    var b=document.createElement('button'); b.className='runrow';
+    var bf=bestFuel(i);
+    b.innerHTML='<span class="n">'+(i+1)+'</span><span class="t">'+r.name+
+      '<small>'+r.sub+(bf!==null?' - best fuel '+Math.round(bf):'')+'</small></span>'+
+      '<span class="done">'+(doneRun(i)?'&#10003;':'')+'</span>';
+    b.addEventListener('click', function(){ AU.init(); AU.click(); startRun(i); });
+    box.appendChild(b);
+  });
+}
+
+function startRun(i){
+  runIdx=i; def=P.runDef(i); s=P.newState(def);
+  aiming=false; flareT=0; lastBurns=-1;
+  ovStart.classList.add('hidden'); ovEnd.classList.add('hidden'); ovPause.classList.add('hidden');
+  playing=true;
+  elRun.textContent=(i+1)+' - '+def.name.toUpperCase();
+  showMsg('RUN '+(i+1)+': '+def.name.toUpperCase()+' - PLOT THE BURN', 2600);
+}
+
+document.getElementById('restartbtn').addEventListener('click', function(e){
+  e.stopPropagation(); if(!def) return; AU.click(); startRun(runIdx);
+});
+document.getElementById('resumebtn').addEventListener('click', function(){
+  ovPause.classList.add('hidden'); playing=true;
+});
+
+function endRun(won){
+  playing=false; aiming=false;
+  var g=0; try{ g=parseInt(store.get('do-games')||'0',10)+1; store.set('do-games',String(g)); }catch(e){}
+  var t=document.getElementById('endtitle'), l=document.getElementById('endline'), b=document.getElementById('endbest');
+  if(won){
+    t.textContent='WRECK SECURED';
+    var fl=Math.round(s.fuelLeft);
+    l.textContent='Run '+(runIdx+1)+' complete with '+fl+' fuel to spare.';
+    var prev=bestFuel(runIdx), nb='NEW BEST';
+    if(prev===null || fl>prev){ store.set('do-best-'+runIdx, String(fl)); }
+    else nb='Best: '+Math.round(prev);
+    b.textContent=nb;
+    store.set('do-done-'+runIdx,'1');
+    AU.dock();
+    document.getElementById('nextbtn').style.display = (runIdx+1<P.RUNS.length)?'block':'none';
+  } else {
+    t.textContent = s.failReason==='lost' ? 'LOST TO GRAVITY' : 'ADRIFT';
+    l.textContent = s.failReason==='lost' ? 'The planet keeps what it catches.' : 'She drifted beyond recall.';
+    b.textContent='';
+    AU.bad();
+    document.getElementById('nextbtn').style.display='none';
+  }
+  ovEnd.classList.remove('hidden');
+}
+document.getElementById('nextbtn').addEventListener('click', function(){ AU.click(); startRun(runIdx+1); });
+document.getElementById('replaybtn').addEventListener('click', function(){ AU.click(); startRun(runIdx); });
+document.getElementById('runsbtn').addEventListener('click', function(){ AU.click(); buildRunList(); ovEnd.classList.add('hidden'); ovStart.classList.remove('hidden'); });
+
+document.addEventListener('visibilitychange', function(){
+  if(document.hidden && playing && ovEnd.classList.contains('hidden')){
+    playing=false; ovPause.classList.remove('hidden');
+  }
+});
+document.addEventListener('contextmenu', function(e){ e.preventDefault(); });
+
+/* ---------- input: one gesture, drag back from the tug ---------- */
+var MAXDRAG=260, MAXDV=130;
+function ptr(e){
+  var r=cv.getBoundingClientRect();
+  return [e.clientX-r.left, e.clientY-r.top];
+}
+cv.addEventListener('pointerdown', function(e){
+  if(!playing||!s) return;
+  if(s.phase!=='towreck'&&s.phase!=='towing') return;
+  if(s.burnsLeft<=0){ showMsg('OUT OF BURNS - SHE DRIFTS', 1800); return; }
+  var p=ptr(e), w=s2w(p[0],p[1]);
+  var d=Math.hypot(w[0]-s.tx, w[1]-s.ty);
+  if(d<150){ aiming=true; aimX=w[0]; aimY=w[1]; cv.setPointerCapture(e.pointerId); e.preventDefault(); }
+});
+cv.addEventListener('pointermove', function(e){
+  if(!aiming) return;
+  var p=ptr(e), w=s2w(p[0],p[1]); aimX=w[0]; aimY=w[1]; e.preventDefault();
+});
+function aimVec(){
+  var dx=s.tx-aimX, dy=s.ty-aimY;
+  var len=Math.hypot(dx,dy);
+  return {dx:dx,dy:dy,len:len};
+}
+cv.addEventListener('pointerup', function(e){
+  if(!aiming) return; aiming=false;
+  var v=aimVec();
+  if(v.len>25 && s.burnsLeft>0){
+    var dv=Math.min(v.len,MAXDRAG)/MAXDRAG*MAXDV;
+    var ang=Math.atan2(v.dy,v.dx);
+    var used=P.applyBurn(s,def,ang,dv);
+    if(used>0){ flareT=0.45; AU.burn(); }
+  }
+});
+cv.addEventListener('pointercancel', function(){ aiming=false; });
+
+function handleEvents(){
+  if(!s.events.length) return;
+  for(var i=0;i<s.events.length;i++){
+    var e=s.events[i];
+    if(e.k==='grapple'){ showMsg('GRAPPLED - TOW HER HOME',2000); AU.grapple(); }
+    else if(e.k==='grappleFast'){ showMsg('TOO FAST TO GRAPPLE',1600); }
+    else if(e.k==='bounce'){ showMsg('BOUNCED OFF - TOO FAST',1800); AU.bad(); }
+    else if(e.k==='dock'){ endRun(true); }
+    else if(e.k==='planet'||e.k==='adrift'){ endRun(false); }
+  }
+  s.events.length=0;
+}
+
+/* ---------- loop ---------- */
+var last=0, acc=0;
+function frame(ts){
+  requestAnimationFrame(frame);
+  var now=ts/1000, dt=Math.min(0.1, now-(last||now)); last=now;
+  if(playing && !aiming && s && (s.phase==='towreck'||s.phase==='towing')){
+    acc+=dt; var n=0;
+    while(acc>=DT && n<16){
+      P.step(s,def); acc-=DT; n++;
+      handleEvents();
+      if(s.phase!=='towreck'&&s.phase!=='towing'){ acc=0; break; }
+    }
+    if(n===16) acc=0;
+  }
+  if(flareT>0) flareT-=dt;
+  render();
+  updateHud();
+}
+
+/* ---------- hud ---------- */
+function updateHud(){
+  if(!s||!def) return;
+  if(s.burnsLeft!==lastBurns){
+    lastBurns=s.burnsLeft;
+    var pips=''; for(var i=0;i<def.burns;i++) pips+= i<s.burnsLeft?'\u25CF':'\u25CB';
+    elBurns.textContent=pips;
+  }
+  elFuel.style.width=Math.max(0,100*s.fuelLeft/def.fuel)+'%';
+}
+
+/* ---------- render ---------- */
+function render(){
+  var cw=view.cw, ch=view.ch;
+  ctx.clearRect(0,0,cw,ch);
+  var bg=ctx.createLinearGradient(0,0,0,ch);
+  bg.addColorStop(0,'#04060e'); bg.addColorStop(1,'#070a16');
+  ctx.fillStyle=bg; ctx.fillRect(0,0,cw,ch);
+
+  var tnow=(s?s.t:0);
+  ctx.fillStyle='#cfe6ff';
+  for(var i=0;i<stars.length;i++){
+    var a=stars[i], p=w2s(a[0],a[1]);
+    var tw=reduced?0.7:(0.45+0.35*Math.sin(tnow*2+a[2]*9));
+    ctx.globalAlpha=tw*(0.35+a[2]*0.5);
+    ctx.fillRect(p[0],p[1],1.6,1.6);
+  }
+  ctx.globalAlpha=1;
+  if(!def||!s) return;
+
+  function circle(x,y,r){ var p=w2s(x,y); ctx.beginPath(); ctx.arc(p[0],p[1],r*view.scale,0,Math.PI*2); }
+
+  // moon
+  var mp=P.moonPos(def,s.t);
+  if(mp){
+    circle(mp.x,mp.y,def.moon.r);
+    ctx.fillStyle='#5a6472'; ctx.fill();
+    ctx.fillStyle='rgba(0,0,0,.3)';
+    circle(mp.x-10,mp.y-8,8); ctx.fill();
+    circle(mp.x+12,mp.y+10,5); ctx.fill();
+  }
+
+  // planet + atmosphere
+  var pp=w2s(def.planet.x,def.planet.y), pr=def.planet.r*view.scale;
+  var glow=ctx.createRadialGradient(pp[0],pp[1],pr*0.9,pp[0],pp[1],pr*1.45);
+  glow.addColorStop(0,'rgba(46,230,168,0)');
+  glow.addColorStop(0.75,'rgba(46,180,230,.14)');
+  glow.addColorStop(1,'rgba(46,180,230,0)');
+  ctx.fillStyle=glow; ctx.beginPath(); ctx.arc(pp[0],pp[1],pr*1.45,0,Math.PI*2); ctx.fill();
+  var pg=ctx.createRadialGradient(pp[0]-pr*0.3,pp[1]-pr*0.3,pr*0.1,pp[0],pp[1],pr);
+  pg.addColorStop(0,'#1d4e6b'); pg.addColorStop(0.7,'#0d2b44'); pg.addColorStop(1,'#071626');
+  ctx.fillStyle=pg; ctx.beginPath(); ctx.arc(pp[0],pp[1],pr,0,Math.PI*2); ctx.fill();
+
+  // station (in circular orbit)
+  var stp=P.stationPos(def,s.t);
+  var sp=w2s(stp.x,stp.y), sr=26*view.scale;
+  ctx.strokeStyle='#2ee6a8'; ctx.lineWidth=2.5;
+  ctx.beginPath(); ctx.arc(sp[0],sp[1],sr,0,Math.PI*2); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(sp[0]-sr,sp[1]); ctx.lineTo(sp[0]+sr,sp[1]);
+  ctx.moveTo(sp[0],sp[1]-sr); ctx.lineTo(sp[0],sp[1]+sr);
+  ctx.stroke();
+  var bl=reduced?1:(0.5+0.5*Math.sin(tnow*4));
+  ctx.fillStyle='rgba(46,230,168,'+(0.4+0.6*bl)+')';
+  ctx.beginPath(); ctx.arc(sp[0],sp[1],3.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#93ab9e'; ctx.font=(11*view.scale+8)+'px system-ui';
+  ctx.textAlign='center'; ctx.fillText('STATION', sp[0], sp[1]-sr-8);
+
+  // prediction arc
+  drawPrediction();
+
+  // wreck
+  drawWreck();
+
+  // tug
+  drawTug();
+
+  // aim arrow
+  if(aiming){
+    var v=aimVec();
+    if(v.len>25){
+      var dv=Math.min(v.len,MAXDRAG)/MAXDRAG*MAXDV;
+      var ang=Math.atan2(v.dy,v.dx);
+      var tp=w2s(s.tx,s.ty);
+      var L=(30+dv*0.9)*view.scale;
+      var ex=tp[0]+Math.cos(ang)*L, ey=tp[1]+Math.sin(ang)*L;
+      ctx.strokeStyle='#ffd166'; ctx.lineWidth=4; ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(tp[0],tp[1]); ctx.lineTo(ex,ey); ctx.stroke();
+      ctx.fillStyle='#ffd166';
+      ctx.beginPath(); ctx.arc(ex,ey,6,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#eef7f2'; ctx.font='bold 15px system-ui'; ctx.textAlign='center';
+      ctx.fillText('BURN '+Math.round(dv), tp[0], tp[1]-34);
+    }
+  }
+}
+
+function drawPrediction(){
+  var h, pts, alpha, dash;
+  if(aiming){
+    var v=aimVec(); if(v.len<=25) return;
+    var dv=Math.min(v.len,MAXDRAG)/MAXDRAG*MAXDV;
+    h=P.cloneState(s);
+    P.applyBurn(h,def,Math.atan2(v.dy,v.dx),dv);
+    pts=P.simulateFrom(h,def,[],14).points;
+    alpha=0.75; dash=[10,8];
+  } else {
+    if(!playing) return;
+    pts=P.simulateFrom(s,def,[],14).points;
+    alpha=0.22; dash=[6,10];
+  }
+  if(!pts.length) return;
+  ctx.strokeStyle='rgba(46,230,168,'+alpha+')';
+  ctx.lineWidth=2; ctx.setLineDash(dash);
+  ctx.beginPath();
+  for(var i=0;i<pts.length;i++){
+    var p=w2s(pts[i][0],pts[i][1]);
+    if(i===0) ctx.moveTo(p[0],p[1]); else ctx.lineTo(p[0],p[1]);
+  }
+  ctx.stroke(); ctx.setLineDash([]);
+
+  // arrival readout near station while towing
+  if(s.phase==='towing' && !aiming){
+    var stp2=P.stationPos(def,s.t), stv2=P.stationVel(def,s.t);
+    var best=1e9, brv=0;
+    for(var j=0;j<pts.length;j+=4){
+      var d=Math.hypot(pts[j][0]-stp2.x,pts[j][1]-stp2.y);
+      if(d<best){ best=d; }
+    }
+    if(best<220){
+      var q=w2s(stp2.x,stp2.y);
+      ctx.fillStyle='rgba(46,230,168,.85)'; ctx.font='13px system-ui'; ctx.textAlign='center';
+      ctx.fillText(best<def.dockD?'ON FINAL':'CLOSEST '+Math.round(best), q[0], q[1]+44*view.scale+14);
+    }
+  }
+}
+
+function drawWreck(){
+  var p=w2s(s.wx,s.wy), r=16*view.scale;
+  var rot=reduced?0.4:s.t*0.35;
+  ctx.save(); ctx.translate(p[0],p[1]); ctx.rotate(rot);
+  ctx.fillStyle='#3a4350';
+  ctx.beginPath();
+  var vs=[[-1.2,-0.7],[0.2,-1.1],[1.2,-0.3],[0.7,0.9],[-0.6,1.0],[-1.2,0.2]];
+  for(var i=0;i<vs.length;i++){ var x=vs[i][0]*r, y=vs[i][1]*r; if(i===0)ctx.moveTo(x,y); else ctx.lineTo(x,y); }
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='rgba(147,171,158,.7)'; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.restore();
+  var bl=reduced?1:(0.4+0.6*Math.abs(Math.sin(s.t*3)));
+  ctx.fillStyle='rgba(255,180,80,'+bl+')';
+  ctx.beginPath(); ctx.arc(p[0],p[1]-r-6,3.2,0,Math.PI*2); ctx.fill();
+  if(s.attached){
+    var tp=w2s(s.tx,s.ty);
+    ctx.strokeStyle='rgba(46,230,168,.5)'; ctx.lineWidth=1.5; ctx.setLineDash([5,5]);
+    ctx.beginPath(); ctx.moveTo(tp[0],tp[1]); ctx.lineTo(p[0],p[1]); ctx.stroke(); ctx.setLineDash([]);
+  }
+}
+
+var lastAng=0;
+function drawTug(){
+  var p=w2s(s.tx,s.ty);
+  var sp=Math.hypot(s.tvx,s.tvy);
+  if(sp>4) lastAng=Math.atan2(s.tvy,s.tvx);
+  ctx.save(); ctx.translate(p[0],p[1]); ctx.rotate(lastAng);
+  var r=13*view.scale;
+  ctx.fillStyle='#cfe6ff';
+  ctx.beginPath(); ctx.moveTo(r*1.4,0); ctx.lineTo(-r*0.9,r*0.85); ctx.lineTo(-r*0.45,0); ctx.lineTo(-r*0.9,-r*0.85);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#0b2b3a';
+  ctx.beginPath(); ctx.arc(r*0.35,0,r*0.34,0,Math.PI*2); ctx.fill();
+  if(flareT>0){
+    var fl=reduced?1:(0.7+0.3*Math.sin(s.t*60));
+    ctx.fillStyle='rgba(255,209,102,'+(0.85*flareT/0.45*fl)+')';
+    ctx.beginPath();
+    ctx.moveTo(-r*0.9,r*0.5); ctx.lineTo(-r*(0.9+1.6*fl),0); ctx.lineTo(-r*0.9,-r*0.5);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+buildRunList();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

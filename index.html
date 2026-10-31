@@ -3,6 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<script>
+/* ?view=desktop preview: force desktop theme on narrow screens */
+try {
+  if (new URLSearchParams(location.search).get("view") === "desktop") {
+    document.querySelector('meta[name="viewport"]').setAttribute("content", "width=1280");
+  }
+} catch (e) {}
+</script>
 <title>Dead Orbit - space salvage</title>
 <style>
   :root{ --jade:#2ee6a8; --ink:#eef7f2; --dim:#93ab9e; }
@@ -48,6 +56,13 @@
   .runrow .t small{ display:block; color:var(--dim); font-size:12px; margin-top:2px; }
   .runrow .done{ color:var(--jade); font-size:18px; }
   .hidden{ display:none !important; }
+/* --- Desktop (Tier 5 desktop-readiness): the canvas letterboxes the fixed
+   900x1400 world by construction, so the play area is already centered. This
+   block only centers the HUD band over it at 1024px and up. Phone CSS above
+   is untouched; physics, prediction arc and the 8 runs are unchanged. --- */
+@media (min-width:1024px){
+  #hud{left:50%;right:auto;transform:translateX(-50%);width:min(760px,100vw);}
+}
 </style>
 </head>
 <body>

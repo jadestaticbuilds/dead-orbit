@@ -28,6 +28,13 @@ try {
   #hud button{ pointer-events:auto; min-width:48px; min-height:48px; border-radius:12px;
     background:rgba(4,10,12,.72); border:1px solid rgba(46,230,168,.35); color:var(--ink);
     font-size:18px; }
+  /* narrow phones: tighten HUD so nothing clips */
+  @media (max-width:480px){
+    #hud{ gap:6px; padding-left:8px; padding-right:8px; }
+    #hud .pill{ padding:5px 8px; font-size:11px; }
+    #hud button{ min-width:42px; min-height:42px; font-size:16px; }
+    #fuelwrap{ width:64px; }
+  }
   #fuelwrap{ width:110px; height:10px; border:1px solid rgba(46,230,168,.4); border-radius:6px; overflow:hidden; }
   #fuelbar{ height:100%; width:100%; background:linear-gradient(90deg,#00a86b,#2ee6a8); }
   #burns{ letter-spacing:2px; color:var(--jade); }
